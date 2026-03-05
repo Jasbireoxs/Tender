@@ -130,7 +130,7 @@ EMD enclosed: {tender_data.emd_amount.value}
 We acknowledge all commercial and risk clauses.
 
 Sincerely,
-[Your Company Name]
+Iron Throne
 """
 
 def display_field(label, field):
