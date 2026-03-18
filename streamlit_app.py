@@ -141,25 +141,40 @@ def check_deadline_reminder(deadline_text):
         st.info(f"Could not parse deadline format: '{deadline_text}'")# -------------------------------
 # 3️⃣ STREAMLIT UI SETUP
 # -------------------------------
+# -------------------------------
+# 3️⃣ STREAMLIT UI SETUP
+# -------------------------------
 st.set_page_config(page_title="Iron Throne AI Control", layout="wide")
 
 if "tender_result" not in st.session_state:
     st.session_state.tender_result = None
 
+# --- SIDEBAR (Now just for settings) ---
 with st.sidebar:
+    st.header("⚙️ System Config")
+    api_key_input = st.text_input("Gemini API Key", type="password")
+    st.markdown("Required for AI Agents to function.")
+
+# --- MAIN DASHBOARD HEADER ---
+# Using columns to put the logo neatly next to the title
+header_col1, header_col2 = st.columns([1, 5]) 
+
+with header_col1:
     if os.path.exists("image_6d399e.png"):
         st.image("image_6d399e.png", use_container_width=True)
     else:
-        st.header("⚙️ Iron Throne Engineering")
-    st.divider()
-    st.header("System Config")
-    api_key_input = st.text_input("Gemini API Key", type="password")
+        st.write("⚙️ Iron Throne")
 
-st.title("🚀 Iron Throne AI Control Center")
-st.markdown("Unified dashboard for Tender Analysis, Vendor Comparison & Operational Tracking")
+with header_col2:
+    st.title("Iron Throne AI Control Center")
+    st.markdown("Unified dashboard for Tender Analysis, Vendor Comparison & Operational Tracking")
 
+st.divider() # Adds a clean line below the header
+
+# --- TABS ---
 tab1, tab2, tab3 = st.tabs(["📄 Tender Intelligence", "📊 Vendor Comparison", "⏰ Follow-up Tracker"])
 
+# (The rest of your Tab 1, Tab 2, and Tab 3 code stays exactly the same below here!)
 # --- TAB 1: TENDER INTELLIGENCE ---
 with tab1:
     st.header("Tender Intelligence System")
