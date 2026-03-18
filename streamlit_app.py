@@ -49,7 +49,12 @@ def get_gemini_model(api_key):
     if not models:
         raise ValueError("No models found. Check API Key.")
     target = next((m for m in models if 'flash' in m.lower() or 'pro' in m.lower()), models[0])
-    return genai.GenerativeModel(target)
+    
+    # FIX: Force temperature to 0.0 so the AI stops changing its mind!
+    return genai.GenerativeModel(
+        model_name=target,
+        generation_config={"temperature": 0.0}
+    )
 
 def clean_json_response(raw_text):
     cleaned = raw_text.strip()
