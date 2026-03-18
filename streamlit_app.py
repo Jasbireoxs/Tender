@@ -13,9 +13,22 @@ from datetime import datetime
 # -------------------------------
 # 1️⃣ PYDANTIC SCHEMAS
 # -------------------------------
+# 1️⃣ PYDANTIC SCHEMAS
+# -------------------------------
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Any
+
 class ExtractedField(BaseModel):
-    value: str = Field(description="The extracted information")
-    confidence_score: int = Field(description="Confidence percentage 0-100")
+    value: str = Field(description="The extracted information or 'Not specified'")
+    confidence_score: int = Field(description="Confidence percentage from 0 to 100")
+
+    # Safety Net: Converts nulls or numbers into safe strings automatically
+    @field_validator('value', mode='before')
+    @classmethod
+    def sanitize_value(cls, v):
+        if v is None:
+            return "Not specified"
+        return str(v)
 
 class RiskItem(BaseModel):
     description: str
@@ -77,7 +90,7 @@ def analyze_tender_with_gemini(text, api_key):
         6. Risk clauses (with risk_level and is_penalty)
         7. Unusual liabilities
 
-        Return ONLY valid JSON:
+       Return ONLY valid JSON. NEVER output null values; if information is missing, output "Not specified".
         {{
           "submission_deadline": {{"value": "...", "confidence_score": 90}},
           "emd_amount": {{"value": "...", "confidence_score": 95}},
