@@ -14,8 +14,8 @@ from datetime import datetime
 # SCHEMAS
 # -------------------------------
 class ExtractedField(BaseModel):
-    value: str
-    confidence_score: int
+    value: str = Field(description="The extracted information or 'Not specified'")
+    confidence_score: int = Field(description="Confidence percentage from 0 to 100")
 
     @field_validator('value', mode='before')
     @classmethod
@@ -91,31 +91,38 @@ def fix_json_keys(data):
 def analyze_tender_with_gemini(text, api_key):
     try:
         model = get_gemini_model(api_key)
+        
+        # Brought back the more detailed, superior prompt
         prompt = f"""
-You are a strict JSON extraction engine.
+You are an AI Tender Intelligence System for Iron Throne Engineering.
 
-RULES:
-- Output ONLY JSON
-- No numbering
-- No explanation
-- No markdown
+Extract the following from the tender document:
+1. Submission deadline (MUST be formatted exactly as DD MMMM YYYY, e.g., 15 October 2026)
+2. EMD amount
+3. Financial criteria
+4. Technical eligibility
+5. Scope summary
+6. Risk clauses (include risk_level and is_penalty)
+7. Unusual liabilities
 
-If missing → "Not found in document"
-
-FORMAT:
+Return ONLY valid JSON in this format. DO NOT include markdown formatting or backticks.
 {{
   "submission_deadline": {{"value": "...", "confidence_score": 90}},
-  "emd_amount": {{"value": "...", "confidence_score": 90}},
-  "financial_criteria": {{"value": "...", "confidence_score": 90}},
-  "technical_eligibility": {{"value": "...", "confidence_score": 90}},
-  "scope_summary": {{"value": "...", "confidence_score": 90}},
+  "emd_amount": {{"value": "...", "confidence_score": 95}},
+  "financial_criteria": {{"value": "...", "confidence_score": 85}},
+  "technical_eligibility": {{"value": "...", "confidence_score": 80}},
+  "scope_summary": {{"value": "...", "confidence_score": 99}},
   "risk_clauses": [
-    {{"description": "...", "risk_level": "High/Medium/Low", "is_penalty": true}}
+      {{
+        "description": "...",
+        "risk_level": "High/Medium/Low",
+        "is_penalty": true
+      }}
   ],
   "unusual_liabilities": ["..."]
 }}
 
-TEXT:
+Tender Document:
 {text}
 """
         response = model.generate_content(prompt)
@@ -140,6 +147,24 @@ TEXT:
     except Exception as e:
         st.error(f"Analysis failed: {e}")
         return None
+
+def generate_draft_response(tender_data):
+    return f"""DRAFT SUBMISSION COVER LETTER
+
+Subject: Submission for Tender - {tender_data.scope_summary.value}
+
+Dear Sir/Madam,
+
+We confirm submission before the deadline of {tender_data.submission_deadline.value}.
+We comply with financial criteria: {tender_data.financial_criteria.value}
+Technical eligibility met: {tender_data.technical_eligibility.value}
+EMD enclosed: {tender_data.emd_amount.value}
+
+We acknowledge all commercial and risk clauses.
+
+Sincerely,
+Iron Throne Engineering
+"""
 
 def normalize_values(data):
     try:
@@ -166,8 +191,10 @@ def normalize_values(data):
 # UI HELPERS
 # -------------------------------
 def display_field(label, field):
-    color = "green" if field.confidence_score > 60 else "red"
-    st.markdown(f"**{label}:** {field.value} (:{color}[Confidence: {field.confidence_score}%])")
+    if field.confidence_score < 60:
+        st.error(f"{label}: {field.value} (Confidence: {field.confidence_score}%)")
+    else:
+        st.success(f"{label}: {field.value} (Confidence: {field.confidence_score}%)")
 
 def generate_excel(result):
     df = pd.DataFrame({
@@ -188,16 +215,17 @@ def generate_excel(result):
 def check_deadline_reminder(deadline_text):
     try:
         deadline_date = datetime.strptime(deadline_text, "%d %B %Y")
-        days = (deadline_date - datetime.today()).days
+        today = datetime.today()
+        days_remaining = (deadline_date - today).days
 
-        if days <= 2:
-            st.error("🚨 Deadline near!")
-        elif days <= 7:
-            st.warning("⚠️ Deadline approaching")
+        if days_remaining <= 2:
+            st.error(f"🚨 Deadline in {days_remaining} days!")
+        elif days_remaining <= 7:
+            st.warning(f"⚠️ Deadline in {days_remaining} days.")
         else:
-            st.info(f"{days} days remaining")
-    except:
-        st.info("Deadline format not recognized")
+            st.info(f"🗓️ {days_remaining} days remaining.")
+    except Exception:
+        st.info(f"Could not automatically parse deadline format from: '{deadline_text}'")
 
 # -------------------------------
 # UI
@@ -223,26 +251,71 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["Tender", "Vendor", "Follow-up"])
 
 # -------------------------------
-# TAB 1
+# TAB 1: TENDER INTELLIGENCE
 # -------------------------------
 with tab1:
     file = st.file_uploader("Upload Tender", type="pdf")
 
     if file and api_key_input:
-        if st.button("Analyze Tender"):
-            with st.spinner("Analyzing document..."):
+        if st.button("Analyze Tender", type="primary"):
+            with st.spinner("Dynamically selecting model and analyzing document..."):
                 text = extract_and_clean_text(file)
-                res = analyze_tender_with_gemini(text, api_key_input)
+                st.session_state.tender_result = analyze_tender_with_gemini(text, api_key_input)
 
-                if res:
-                    display_field("Deadline", res.submission_deadline)
-                    display_field("EMD", res.emd_amount)
-                    check_deadline_reminder(res.submission_deadline.value)
-                    
-                    st.download_button("Download Excel Report", data=generate_excel(res), file_name="Tender_Report.xlsx")
+        if st.session_state.tender_result:
+            result = st.session_state.tender_result
+            st.success("Analysis Complete")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.subheader("📌 Key Details")
+                display_field("Deadline", result.submission_deadline)
+                display_field("EMD", result.emd_amount)
+                display_field("Financial Criteria", result.financial_criteria)
+
+            with col2:
+                st.subheader("🔍 Technical Overview")
+                display_field("Technical Eligibility", result.technical_eligibility)
+                display_field("Scope Summary", result.scope_summary)
+
+            st.subheader("⏰ Deadline Reminder")
+            check_deadline_reminder(result.submission_deadline.value)
+
+            st.subheader("⚠️ Risk Clauses")
+            for risk in result.risk_clauses:
+                st.write(f"- {risk.description} | Level: {risk.risk_level} | Penalty: {risk.is_penalty}")
+
+            st.subheader("⚡ Unusual Liabilities")
+            for item in result.unusual_liabilities:
+                st.write("-", item)
+
+            st.subheader("📝 Draft Cover Letter")
+            draft = generate_draft_response(result)
+            st.text_area("Generated Draft", draft, height=250)
+
+            col_dl1, col_dl2 = st.columns(2)
+            
+            with col_dl1:
+                result_dict = result.model_dump()
+                st.download_button(
+                    "📥 Download JSON Report",
+                    data=json.dumps(result_dict, indent=2),
+                    file_name="tender_analysis.json",
+                    mime="application/json"
+                )
+
+            with col_dl2:
+                excel_file = generate_excel(result)
+                st.download_button(
+                    "📊 Download Excel Report",
+                    data=excel_file,
+                    file_name="tender_analysis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
 # -------------------------------
-# TAB 2
+# TAB 2: VENDOR QUOTE COMPARISON
 # -------------------------------
 with tab2:
     files = st.file_uploader("Upload Quotes", accept_multiple_files=True, type=["png", "jpg", "jpeg"])
@@ -274,7 +347,43 @@ with tab2:
                     st.dataframe(df)
 
 # -------------------------------
-# TAB 3
+# TAB 3: FOLLOW UP TRACKER
 # -------------------------------
 with tab3:
-    st.write("Follow-up system active")
+    st.header("Agentic Delivery Follow-up")
+    st.markdown("Tracks expected dates and auto-generates context-aware vendor follow-ups.")
+    
+    # Simulated active database
+    orders = [
+        {"vendor": "L&T Switchgears", "item": "33kV Transformers", "date": datetime(2026, 3, 20).date()},
+        {"vendor": "Polycab Cables", "item": "Armoured Cables", "date": datetime(2026, 3, 28).date()},
+        {"vendor": "Local Hardware Supply", "item": "Cement Bags", "date": datetime(2026, 3, 17).date()}
+    ]
+    
+    for o in orders:
+        with st.expander(f"{o['vendor']} - {o['item']}"):
+            today = datetime.today().date()
+            days_remaining = (o['date'] - today).days
+            
+            st.write(f"**Expected Date:** {o['date']}")
+            
+            needs_alert = False
+            if days_remaining < 0:
+                st.error(f"❌ Delayed by {abs(days_remaining)} days.")
+                needs_alert = True
+            elif days_remaining <= 2:
+                st.warning(f"⚠️ Due in {days_remaining} days. Follow-up required.")
+                needs_alert = True
+            else:
+                st.success(f"✅ On track. {days_remaining} days remaining.")
+            
+            if needs_alert:
+                if st.button(f"Generate AI Alert for {o['vendor']}", key=o['vendor']):
+                    if not api_key_input:
+                        st.warning("Enter API Key to use the Agent.")
+                    else:
+                        with st.spinner("Agent drafting message..."):
+                            model = get_gemini_model(api_key_input)
+                            prompt = f"Draft a polite but firm WhatsApp message to {o['vendor']} regarding the delivery of {o['item']} which was expected on {o['date']}. Identify the sender as Iron Throne Engineering. Remind them that site operations depend on this."
+                            response = model.generate_content(prompt)
+                            st.text_area("WhatsApp Draft (Ready to Send):", response.text, height=150)
