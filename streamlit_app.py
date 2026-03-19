@@ -11,7 +11,7 @@ from io import BytesIO
 from datetime import datetime
 
 # -------------------------------
-# 1️⃣ SCHEMAS
+# SCHEMAS
 # -------------------------------
 class ExtractedField(BaseModel):
     value: str
@@ -42,7 +42,7 @@ class TenderIntelligence(BaseModel):
 
 
 # -------------------------------
-# 2️⃣ CORE FUNCTIONS
+# CORE FUNCTIONS
 # -------------------------------
 def extract_and_clean_text(uploaded_file):
     pdf_reader = PyPDF2.PdfReader(uploaded_file)
@@ -57,8 +57,6 @@ def extract_and_clean_text(uploaded_file):
 def get_gemini_model(api_key):
     genai.configure(api_key=api_key)
     models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    if not models:
-        raise ValueError("No models found. Check API Key.")
     target = next((m for m in models if 'flash' in m.lower() or 'pro' in m.lower()), models[0])
     return genai.GenerativeModel(model_name=target, generation_config={"temperature": 0.0})
 
@@ -66,95 +64,96 @@ def get_gemini_model(api_key):
 def clean_json_response(raw_text):
     cleaned = raw_text.strip()
     if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[-1]
-        if cleaned.endswith("```"):
-            cleaned = cleaned.rsplit("\n", 1)[0]
-    return cleaned.strip()
+        cleaned = re.sub(r"^```(?:json)?|```$", "", cleaned, flags=re.IGNORECASE).strip()
+    return cleaned
 
 
+# -------------------------------
+# KEY FIX FUNCTION
+# -------------------------------
+def fix_json_keys(data):
+    mapping = {
+        "submission deadline": "submission_deadline",
+        "emd amount": "emd_amount",
+        "financial criteria": "financial_criteria",
+        "technical eligibility": "technical_eligibility",
+        "scope summary": "scope_summary"
+    }
+
+    fixed = {}
+
+    for k, v in data.items():
+        clean_key = re.sub(r'^\d+\.\s*', '', k.lower().strip())
+
+        if clean_key in mapping:
+            fixed[mapping[clean_key]] = v
+        else:
+            fixed[k] = v
+
+    return fixed
+
+
+# -------------------------------
+# MAIN ANALYSIS
+# -------------------------------
 def analyze_tender_with_gemini(text, api_key):
     try:
         model = get_gemini_model(api_key)
+
         prompt = f"""
-You are an AI Tender Intelligence System.
+You are a strict JSON extraction engine.
 
-Extract:
-1. Submission deadline (DD MMMM YYYY)
-2. EMD amount
-3. Financial criteria
-4. Technical eligibility
-5. Scope summary
-6. Risk clauses
-7. Unusual liabilities
+RULES:
+- Output ONLY JSON
+- No numbering
+- No explanation
+- No markdown
 
-If missing, return "Not found in document".
+If missing → "Not found in document"
 
-Return valid JSON only.
+FORMAT:
+{{
+  "submission_deadline": {{"value": "...", "confidence_score": 90}},
+  "emd_amount": {{"value": "...", "confidence_score": 90}},
+  "financial_criteria": {{"value": "...", "confidence_score": 90}},
+  "technical_eligibility": {{"value": "...", "confidence_score": 90}},
+  "scope_summary": {{"value": "...", "confidence_score": 90}},
+  "risk_clauses": [
+    {{"description": "...", "risk_level": "High/Medium/Low", "is_penalty": true}}
+  ],
+  "unusual_liabilities": ["..."]
+}}
 
-Text:
+TEXT:
 {text}
 """
+
         response = model.generate_content(prompt)
-        parsed_json = json.loads(clean_json_response(response.text))
-        return TenderIntelligence(**parsed_json)
+
+        parsed = json.loads(clean_json_response(response.text))
+        parsed = fix_json_keys(parsed)
+
+        # Ensure all fields exist
+        required = [
+            "submission_deadline", "emd_amount", "financial_criteria",
+            "technical_eligibility", "scope_summary",
+            "risk_clauses", "unusual_liabilities"
+        ]
+
+        for key in required:
+            if key not in parsed:
+                if key in ["risk_clauses"]:
+                    parsed[key] = []
+                elif key in ["unusual_liabilities"]:
+                    parsed[key] = []
+                else:
+                    parsed[key] = {"value": "Not found in document", "confidence_score": 0}
+
+        return TenderIntelligence(**parsed)
+
     except Exception as e:
         st.error(f"Analysis failed: {e}")
         return None
-
-
-def generate_draft_response(tender_data):
-    return f"""
-DRAFT SUBMISSION COVER LETTER
-
-Subject: Submission for Tender - {tender_data.scope_summary.value}
-
-Dear Sir/Madam,
-
-We confirm submission before {tender_data.submission_deadline.value}.
-We meet financial criteria: {tender_data.financial_criteria.value}
-Technical eligibility: {tender_data.technical_eligibility.value}
-EMD enclosed: {tender_data.emd_amount.value}
-
-Sincerely,
-Iron Throne Engineering
-"""
-
-
-def display_field(label, field):
-    color = "green" if field.confidence_score > 60 else "red"
-    st.markdown(f"**{label}:** {field.value} (:{color}[Confidence: {field.confidence_score}%])")
-
-
-def generate_excel(result):
-    df = pd.DataFrame({
-        "Field": ["Deadline", "EMD", "Financial", "Technical", "Scope"],
-        "Value": [
-            result.submission_deadline.value,
-            result.emd_amount.value,
-            result.financial_criteria.value,
-            result.technical_eligibility.value,
-            result.scope_summary.value
-        ]
-    })
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False)
-    return output.getvalue()
-
-
-def check_deadline_reminder(deadline_text):
-    try:
-        deadline_date = datetime.strptime(deadline_text, "%d %B %Y")
-        days_remaining = (deadline_date - datetime.today()).days
-
-        if days_remaining <= 2:
-            st.error(f"🚨 Deadline in {days_remaining} days!")
-        elif days_remaining <= 7:
-            st.warning(f"⚠️ Deadline in {days_remaining} days.")
-        else:
-            st.info(f"🗓️ {days_remaining} days remaining.")
-    except:
-        st.info(f"Could not parse deadline: '{deadline_text}'")
 
 
 # -------------------------------
@@ -185,12 +184,49 @@ def normalize_values(data):
 
 
 # -------------------------------
+# UI HELPERS
+# -------------------------------
+def display_field(label, field):
+    color = "green" if field.confidence_score > 60 else "red"
+    st.markdown(f"**{label}:** {field.value} (:{color}[Confidence: {field.confidence_score}%])")
+
+
+def generate_excel(result):
+    df = pd.DataFrame({
+        "Field": ["Deadline", "EMD", "Financial", "Technical", "Scope"],
+        "Value": [
+            result.submission_deadline.value,
+            result.emd_amount.value,
+            result.financial_criteria.value,
+            result.technical_eligibility.value,
+            result.scope_summary.value
+        ]
+    })
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False)
+    return output.getvalue()
+
+
+def check_deadline_reminder(deadline_text):
+    try:
+        deadline_date = datetime.strptime(deadline_text, "%d %B %Y")
+        days = (deadline_date - datetime.today()).days
+
+        if days <= 2:
+            st.error("🚨 Deadline near!")
+        elif days <= 7:
+            st.warning("⚠️ Deadline approaching")
+        else:
+            st.info(f"{days} days remaining")
+    except:
+        st.info("Deadline format not recognized")
+
+
+# -------------------------------
 # UI
 # -------------------------------
-st.set_page_config(page_title="Iron Throne AI Control", layout="wide")
-
-if "tender_result" not in st.session_state:
-    st.session_state.tender_result = None
+st.set_page_config(page_title="Iron Throne AI", layout="wide")
 
 # HEADER
 col1, col2 = st.columns([1, 5])
@@ -201,9 +237,8 @@ with col1:
 
 with col2:
     st.title("Iron Throne AI Control Center")
-    st.markdown("Unified dashboard for Tender Analysis, Vendor Comparison & Operations")
+    st.markdown("AI-powered Operations Dashboard")
 
-st.info("⚡ AI-powered automation across documents, vendors, and workflows")
 st.divider()
 
 # Sidebar
@@ -211,68 +246,30 @@ with st.sidebar:
     api_key_input = st.text_input("Gemini API Key", type="password")
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["📄 Tender", "📊 Vendor", "⏰ Follow-up"])
+tab1, tab2, tab3 = st.tabs(["Tender", "Vendor", "Follow-up"])
 
 # -------------------------------
-# TAB 1: TENDER
+# TAB 1
 # -------------------------------
 with tab1:
-    uploaded_file = st.file_uploader("Upload Tender PDF", type="pdf")
+    file = st.file_uploader("Upload Tender", type="pdf")
 
-    if uploaded_file and api_key_input:
+    if file and api_key_input:
         if st.button("Analyze Tender"):
-            text = extract_and_clean_text(uploaded_file)
-            st.session_state.tender_result = analyze_tender_with_gemini(text, api_key_input)
+            text = extract_and_clean_text(file)
+            res = analyze_tender_with_gemini(text, api_key_input)
 
-        if st.session_state.tender_result:
-            res = st.session_state.tender_result
-
-            c1, c2 = st.columns(2)
-
-            with c1:
+            if res:
                 display_field("Deadline", res.submission_deadline)
                 display_field("EMD", res.emd_amount)
 
-            with c2:
-                display_field("Financial", res.financial_criteria)
-                display_field("Technical", res.technical_eligibility)
+                check_deadline_reminder(res.submission_deadline.value)
 
-            check_deadline_reminder(res.submission_deadline.value)
+                st.text_area("Draft", generate_excel(res))
 
-            # Missing warning
-            if res.submission_deadline.value.lower() == "not found in document":
-                st.warning("⚠️ Deadline missing - manual review needed")
-
-            # Risk
-            st.subheader("⚠️ Risk Analysis")
-            risk_levels = []
-
-            for r in res.risk_clauses:
-                risk_levels.append(r.risk_level)
-                if r.risk_level == "High":
-                    st.error(r.description)
-                else:
-                    st.warning(r.description)
-
-            if "High" in risk_levels:
-                st.error("🚨 Overall Risk: HIGH")
-            elif "Medium" in risk_levels:
-                st.warning("⚠️ Overall Risk: MEDIUM")
-            else:
-                st.success("✅ Overall Risk: LOW")
-
-            # Draft
-            st.text_area("Draft", generate_draft_response(res), height=200)
-
-            # Downloads
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button("Download JSON", data=json.dumps(res.model_dump(), indent=2))
-            with col2:
-                st.download_button("Download Excel", data=generate_excel(res))
 
 # -------------------------------
-# TAB 2: VENDOR
+# TAB 2
 # -------------------------------
 with tab2:
     files = st.file_uploader("Upload Quotes", accept_multiple_files=True)
@@ -292,27 +289,8 @@ with tab2:
             df = pd.DataFrame(vendors)
             st.dataframe(df)
 
-            best = df.loc[df["Price"].idxmin()]
-            st.success(f"🏆 Best Vendor: {best['Vendor']}")
-
 # -------------------------------
-# TAB 3: FOLLOW-UP
+# TAB 3
 # -------------------------------
 with tab3:
-    st.header("Follow-up System")
-
-    vendor = "L&T"
-    item = "Transformer"
-    date = datetime(2026, 3, 20).date()
-
-    days = (date - datetime.today().date()).days
-
-    if days <= 2:
-        st.warning("Follow-up required")
-
-        if st.button("Generate Message"):
-            model = get_gemini_model(api_key_input)
-            msg = model.generate_content(
-                f"Write a professional WhatsApp message to {vendor} about delay in {item} impacting project timelines."
-            )
-            st.text_area("Message", msg.text)
+    st.write("Follow-up system active")
