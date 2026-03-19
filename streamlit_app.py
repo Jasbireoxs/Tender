@@ -150,16 +150,36 @@ def check_deadline_reminder(deadline_text):
 # -------------------------------
 # STREAMLIT UI
 # -------------------------------
-st.set_page_config(page_title="AI Control Center", layout="wide")
+st.set_page_config(page_title="Iron Throne AI Control", layout="wide")
 
-st.title("🚀 AI Operations Control Center")
+if "tender_result" not in st.session_state:
+    st.session_state.tender_result = None
+
+# -------------------------------
+# HEADER (LOGO RESTORED)
+# -------------------------------
+header_col1, header_col2 = st.columns([1, 5])
+
+with header_col1:
+    if os.path.exists("image_6d399e.png"):
+        st.image("image_6d399e.png", use_container_width=True)
+    else:
+        st.markdown("### ⚙️")
+
+with header_col2:
+    st.title("Iron Throne AI Control Center")
+    st.markdown("Unified dashboard for Tender Analysis, Vendor Comparison & Operational Tracking")
+
 st.info("⚡ Combines Document AI, Vision AI & Agentic Automation")
+st.divider()
 
+# Sidebar
 with st.sidebar:
+    st.header("⚙️ System Config")
     api_key_input = st.text_input("Gemini API Key", type="password")
 
-tab1, tab2, tab3 = st.tabs(["📄 Tender", "📊 Vendor", "⏰ Follow-up"])
-
+# Tabs
+tab1, tab2, tab3 = st.tabs(["📄 Tender Intelligence", "📊 Vendor Comparison", "⏰ Follow-up Tracker"])
 
 # -------------------------------
 # TAB 1: TENDER
@@ -168,7 +188,7 @@ with tab1:
     file = st.file_uploader("Upload Tender PDF", type="pdf")
 
     if file and api_key_input:
-        if st.button("Analyze"):
+        if st.button("Analyze Tender"):
             text = extract_and_clean_text(file)
             res = analyze_tender_with_gemini(text, api_key_input)
 
@@ -176,7 +196,7 @@ with tab1:
                 display_field("Deadline", res.submission_deadline)
 
                 if res.submission_deadline.value.lower() == "not found in document":
-                    st.warning("⚠️ Deadline missing. Manual review required.")
+                    st.warning("⚠️ Critical Info Missing: Deadline not found.")
 
                 check_deadline_reminder(res.submission_deadline.value)
 
@@ -193,12 +213,11 @@ with tab1:
                 elif "Medium" in risk_levels:
                     st.warning("⚠️ Overall Risk: MEDIUM")
 
-
 # -------------------------------
 # TAB 2: VENDOR
 # -------------------------------
 with tab2:
-    files = st.file_uploader("Upload Quotes", accept_multiple_files=True)
+    files = st.file_uploader("Upload Vendor Quotes", accept_multiple_files=True)
 
     if files and api_key_input:
         if st.button("Analyze Quotes"):
@@ -225,13 +244,14 @@ with tab2:
             st.dataframe(df)
 
             best = df.loc[df["Price"].idxmin()]
-            st.success(f"🏆 Best Vendor: {best['Vendor']} (Lowest Price)")
-
+            st.success(f"🏆 Recommended Vendor: {best['Vendor']}")
 
 # -------------------------------
 # TAB 3: FOLLOW-UP
 # -------------------------------
 with tab3:
+    st.header("Delivery Monitoring")
+
     vendor = "L&T"
     item = "Transformer"
     date = datetime(2026, 3, 20).date()
@@ -239,11 +259,11 @@ with tab3:
     days = (date - datetime.today().date()).days
 
     if days <= 2:
-        st.warning("Follow-up needed")
+        st.warning("⚠️ Follow-up required")
 
-        if st.button("Generate Message"):
+        if st.button("Generate AI Message"):
             model = get_gemini_model(api_key_input)
             msg = model.generate_content(
                 f"Write a professional WhatsApp message to {vendor} about delay in {item}. Mention project impact."
             )
-            st.text_area("Message", msg.text)
+            st.text_area("Generated Message", msg.text)
